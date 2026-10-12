@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Drawing;
@@ -320,7 +320,7 @@ namespace LolAsistan
 
         static readonly Dictionary<string, string> phaseText = new Dictionary<string, string>
         {
-            {"None","Ana menü"},{"Lobby","Lobide"},{"Matchmaking","Sırada, maç aranıyor..."},{"ReadyCheck","Maç bulundu!"},
+            {"None","Ana menü"},{"Lobby","Lobide"},{"Matchmaking","Maç aranıyor"},{"ReadyCheck","Maç bulundu!"},
             {"ChampSelect","Şampiyon seçimi"},{"GameStart","Oyun başlıyor"},{"InProgress","Oyunda"},{"Reconnect","Yeniden bağlan"},
             {"WaitingForStats","Oyun bitti"},{"PreEndOfGame","Oyun bitti"},{"EndOfGame","Oyun sonu ekranı"}
         };
@@ -339,7 +339,7 @@ namespace LolAsistan
                 if (DateTime.Now < nextConnect) return;
                 nextConnect = DateTime.Now.AddSeconds(3);
                 var l = Lcu.Find();
-                if (l == null) { Status("LoL istemcisi bekleniyor...", false); return; }
+                if (l == null) { Status("LoL bekleniyor", false); return; }
                 try
                 {
                     var sum = l.Get("/lol-game-data/assets/v1/champion-summary.json");
@@ -348,7 +348,7 @@ namespace LolAsistan
                     ChampsChanged();
                     l.Get("/lol-gameflow/v1/gameflow-phase");
                 }
-                catch { Status("LoL istemcisi açılıyor...", false); return; }
+                catch { Status("LoL açılıyor", false); return; }
                 lcu = l;
                 lastPhase = null;
                 Log("İstemciye bağlanıldı.");
@@ -356,7 +356,7 @@ namespace LolAsistan
 
             string phase;
             try { phase = J.Str(lcu.Get("/lol-gameflow/v1/gameflow-phase")); }
-            catch { lcu = null; lastPhase = ""; Log("İstemci bağlantısı koptu, tekrar bağlanılacak."); Status("LoL istemcisi bekleniyor...", false); return; }
+            catch { lcu = null; lastPhase = ""; Log("İstemci bağlantısı koptu, tekrar bağlanılacak."); Status("LoL bekleniyor", false); return; }
 
             if (phase != lastPhase)
             {
@@ -505,241 +505,4 @@ namespace LolAsistan
         public Ayarlar() { active = accept = pickOn = lockIn = banOn = true; picks = new string[3]; bans = new string[3]; }
     }
 
-    // ---------------- arayuz ----------------
-    class MainForm : Form
-    {
-        readonly Engine engine = new Engine();
-        readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
-        int busy;
-        bool loading = true, suppress;
-
-        Label statusLbl;
-        CheckBox chkActive, chkAccept, chkPick, chkLock, chkBan;
-        readonly TextBox[] pickBoxes = new TextBox[3], banBoxes = new TextBox[3];
-        readonly Label[] pickInfo = new Label[3], banInfo = new Label[3];
-        ListBox suggest;
-        TextBox suggestFor;
-        TextBox logBox;
-
-        static readonly Color Ok = Color.FromArgb(0, 120, 60), Bad = Color.FromArgb(200, 40, 40);
-
-        public MainForm()
-        {
-            Text = "LoL Asistan";
-            Font = new Font("Segoe UI", 9f);
-            ClientSize = new Size(420, 590);
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
-            StartPosition = FormStartPosition.CenterScreen;
-            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
-
-            var title = new Label { Text = "LoL Asistan", AutoSize = true, Location = new Point(14, 10), Font = new Font("Segoe UI", 14f, FontStyle.Bold) };
-            statusLbl = new Label { AutoSize = true, Location = new Point(16, 44), Font = new Font("Segoe UI", 9f, FontStyle.Bold), ForeColor = Color.Gray, Text = "LoL istemcisi bekleniyor..." };
-            chkActive = new CheckBox { Text = "Asistan açık", AutoSize = true, Location = new Point(16, 70), Checked = true };
-            chkAccept = new CheckBox { Text = "Maçı otomatik kabul et", AutoSize = true, Location = new Point(16, 94), Checked = true };
-            Controls.AddRange(new Control[] { title, statusLbl, chkActive, chkAccept });
-
-            var gPick = MakeGroup("Seçilecek şampiyonlar (öncelik sırasıyla)", 126, pickBoxes, pickInfo);
-            chkPick = new CheckBox { Text = "Otomatik seç", AutoSize = true, Location = new Point(14, 128), Checked = true };
-            chkLock = new CheckBox { Text = "Kilitle", AutoSize = true, Location = new Point(130, 128), Checked = true };
-            var hint = new Label { Text = "ARAM: bench'ten bu sıraya göre alır", AutoSize = true, Location = new Point(200, 129), ForeColor = Color.Gray };
-            gPick.Controls.AddRange(new Control[] { chkPick, chkLock, hint });
-
-            var gBan = MakeGroup("Banlanacak şampiyonlar (öncelik sırasıyla)", 296, banBoxes, banInfo);
-            chkBan = new CheckBox { Text = "Otomatik banla", AutoSize = true, Location = new Point(14, 128), Checked = true };
-            gBan.Controls.Add(chkBan);
-            Controls.AddRange(new Control[] { gPick, gBan });
-
-            logBox = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Location = new Point(14, 468), Size = new Size(392, 108) };
-            Controls.Add(logBox);
-
-            suggest = new ListBox { Visible = false, Width = 200, Height = 140, IntegralHeight = false, TabStop = false };
-            suggest.MouseDown += (s, e) =>
-            {
-                int i = suggest.IndexFromPoint(e.Location);
-                if (i >= 0 && suggestFor != null) Accept(suggestFor, (Champ)suggest.Items[i]);
-            };
-            Controls.Add(suggest);
-            suggest.BringToFront();
-
-            engine.Log = m => Ui(() => AddLog(m));
-            engine.Status = (t, ok) => Ui(() => { statusLbl.Text = t; statusLbl.ForeColor = ok ? Ok : Color.Gray; });
-            engine.ChampsChanged = () => Ui(RefreshAll);
-
-            LoadSettings();
-            Champs.LoadCache();
-            RefreshAll();
-
-            foreach (var cb in new[] { chkActive, chkAccept, chkPick, chkLock, chkBan }) cb.CheckedChanged += (s, e) => SaveSettings();
-            chkActive.CheckedChanged += (s, e) => AddLog(chkActive.Checked ? "Asistan açıldı." : "Asistan kapatıldı (sadece izliyor).");
-            loading = false;
-
-            Task.Run(() =>
-            {
-                bool ok = Champs.LoadDDragon();
-                Ui(() => { RefreshAll(); if (!ok && Champs.Count == 0) AddLog("Şampiyon listesi indirilemedi; LoL açılınca istemciden alınacak."); });
-            });
-
-            AddLog("Başlatıldı.");
-            timer.Interval = 1000;
-            timer.Tick += (s, e) => OnTimer();
-            Shown += (s, e) => { timer.Start(); OnTimer(); };
-            FormClosing += (s, e) => { timer.Stop(); SaveSettings(); };
-        }
-
-        GroupBox MakeGroup(string title, int y, TextBox[] boxes, Label[] infos)
-        {
-            var g = new GroupBox { Text = title, Location = new Point(14, y), Size = new Size(392, 160) };
-            for (int i = 0; i < 3; i++)
-            {
-                g.Controls.Add(new Label { Text = (i + 1) + ".", AutoSize = true, Location = new Point(14, 30 + i * 32) });
-                var tb = new TextBox { Location = new Point(36, 27 + i * 32), Width = 180 };
-                var info = new Label { AutoSize = true, Location = new Point(224, 30 + i * 32) };
-                boxes[i] = tb; infos[i] = info;
-                int idx = i;
-                tb.TextChanged += (s, e) => { UpdateInfo(tb, info); if (!suppress) { ShowSuggest(tb); SaveSettings(); } };
-                tb.KeyDown += (s, e) => OnBoxKey(tb, e);
-                tb.Leave += (s, e) => BeginInvoke((Action)(() =>
-                {
-                    if (suggestFor == tb && !suggest.Focused) HideSuggest();
-                    var c = Champs.Resolve(tb.Text);
-                    if (c != null && tb.Text != c.Name) SetText(tb, c.Name);
-                }));
-                g.Controls.Add(tb);
-                g.Controls.Add(info);
-            }
-            return g;
-        }
-
-        void UpdateInfo(TextBox tb, Label info)
-        {
-            if (tb.Text.Trim().Length == 0) { info.Text = ""; return; }
-            if (Champs.Count == 0) { info.Text = "liste yükleniyor..."; info.ForeColor = Color.Gray; return; }
-            var c = Champs.Resolve(tb.Text);
-            if (c != null) { info.Text = "✓ " + c.Name; info.ForeColor = Ok; }
-            else { info.Text = "✗ bulunamadı"; info.ForeColor = Bad; }
-        }
-
-        void RefreshAll()
-        {
-            for (int i = 0; i < 3; i++) { UpdateInfo(pickBoxes[i], pickInfo[i]); UpdateInfo(banBoxes[i], banInfo[i]); }
-        }
-
-        void SetText(TextBox tb, string t)
-        {
-            suppress = true;
-            tb.Text = t;
-            tb.SelectionStart = t.Length;
-            suppress = false;
-            SaveSettings();
-        }
-
-        void ShowSuggest(TextBox tb)
-        {
-            if (!tb.Focused || tb.Text.Trim().Length == 0) { HideSuggest(); return; }
-            var list = Champs.Suggest(tb.Text, 30);
-            if (list.Count == 0) { HideSuggest(); return; }
-            suggestFor = tb;
-            suggest.BeginUpdate();
-            suggest.Items.Clear();
-            foreach (var c in list) suggest.Items.Add(c);
-            suggest.SelectedIndex = 0;
-            suggest.EndUpdate();
-            var p = PointToClient(tb.Parent.PointToScreen(new Point(tb.Left, tb.Bottom)));
-            suggest.Location = p;
-            suggest.Width = tb.Width;
-            suggest.Height = Math.Min(list.Count, 8) * suggest.ItemHeight + 6;
-            suggest.Visible = true;
-            suggest.BringToFront();
-        }
-
-        void HideSuggest() { suggest.Visible = false; suggestFor = null; }
-
-        void Accept(TextBox tb, Champ c)
-        {
-            SetText(tb, c.Name);
-            HideSuggest();
-            tb.Focus();
-        }
-
-        void OnBoxKey(TextBox tb, KeyEventArgs e)
-        {
-            bool open = suggest.Visible && suggestFor == tb;
-            if (e.KeyCode == Keys.Down && open) { if (suggest.SelectedIndex < suggest.Items.Count - 1) suggest.SelectedIndex++; e.Handled = true; }
-            else if (e.KeyCode == Keys.Up && open) { if (suggest.SelectedIndex > 0) suggest.SelectedIndex--; e.Handled = true; }
-            else if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Tab && open)
-            {
-                if (open && suggest.SelectedItem != null) Accept(tb, (Champ)suggest.SelectedItem);
-                else { var c = Champs.Resolve(tb.Text); if (c != null) SetText(tb, c.Name); }
-                e.Handled = e.SuppressKeyPress = true;
-            }
-            else if (e.KeyCode == Keys.Escape) { HideSuggest(); e.Handled = e.SuppressKeyPress = true; }
-        }
-
-        void Ui(Action a)
-        {
-            if (IsDisposed || !IsHandleCreated) return;
-            try { BeginInvoke(a); } catch { }
-        }
-
-        void AddLog(string m) { logBox.AppendText(DateTime.Now.ToString("HH:mm:ss") + "  " + m + "\r\n"); }
-
-        List<int> Ids(TextBox[] boxes)
-        {
-            var r = new List<int>();
-            foreach (var tb in boxes) { var c = Champs.Resolve(tb.Text); if (c != null && !r.Contains(c.Id)) r.Add(c.Id); }
-            return r;
-        }
-
-        void OnTimer()
-        {
-            if (Interlocked.CompareExchange(ref busy, 1, 0) != 0) return;
-            var cfg = new Cfg
-            {
-                Active = chkActive.Checked, Accept = chkAccept.Checked, PickOn = chkPick.Checked,
-                Lock = chkLock.Checked, BanOn = chkBan.Checked, Picks = Ids(pickBoxes), Bans = Ids(banBoxes)
-            };
-            Task.Run(() =>
-            {
-                try { engine.Tick(cfg); } catch { }
-                finally { Interlocked.Exchange(ref busy, 0); }
-            });
-        }
-
-        void LoadSettings()
-        {
-            try
-            {
-                if (!File.Exists(Paths.Settings)) return;
-                var a = J.S.Deserialize<Ayarlar>(File.ReadAllText(Paths.Settings, Encoding.UTF8));
-                chkActive.Checked = a.active; chkAccept.Checked = a.accept; chkPick.Checked = a.pickOn;
-                chkLock.Checked = a.lockIn; chkBan.Checked = a.banOn;
-                suppress = true;
-                for (int i = 0; i < 3; i++)
-                {
-                    if (a.picks != null && i < a.picks.Length) pickBoxes[i].Text = a.picks[i] ?? "";
-                    if (a.bans != null && i < a.bans.Length) banBoxes[i].Text = a.bans[i] ?? "";
-                }
-                suppress = false;
-            }
-            catch { suppress = false; }
-        }
-
-        void SaveSettings()
-        {
-            if (loading) return;
-            try
-            {
-                var a = new Ayarlar
-                {
-                    active = chkActive.Checked, accept = chkAccept.Checked, pickOn = chkPick.Checked,
-                    lockIn = chkLock.Checked, banOn = chkBan.Checked,
-                    picks = pickBoxes.Select(t => t.Text).ToArray(), bans = banBoxes.Select(t => t.Text).ToArray()
-                };
-                Directory.CreateDirectory(Paths.Dir);
-                File.WriteAllText(Paths.Settings, J.S.Serialize(a), Encoding.UTF8);
-            }
-            catch { }
-        }
-    }
 }
